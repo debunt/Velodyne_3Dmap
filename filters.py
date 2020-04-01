@@ -23,5 +23,6 @@ def filter(lin_transl, iPose, curr_T, poses, d=0.2):
     T_trans = poses[iPose] @ np.linalg.inv(curr_T)  # transition matrix from last unfiltered to current position
     dist_last_accepted = np.linalg.norm(mrob.SE3(T_trans).ln())  # distance from last unfiltered position to current
     # debug
-    print(i, iPose, (lin_transl < d) and (dist_last_accepted < (i - iPose) * 0.205), lin_transl, dist_last_accepted)
-    return ((lin_transl < d) and (dist_last_accepted < (i - iPose) * 0.205))
+    print(i, iPose, (lin_transl < d) and (dist_last_accepted < (i - iPose) * d), lin_transl, dist_last_accepted)
+    # return ((lin_transl < d) and (dist_last_accepted < (i - iPose) * d))
+    return lin_transl < d

@@ -8,10 +8,15 @@ import math
 import open3d
 import glob
 import os
+import deprecation
+from collections import defaultdict
 
 
 
-def rectify(source, transformation, discr_count=10):
+
+
+
+def rectify(source, transformation, timestamp, discr_count=10):
     """
 
     :param source:
@@ -19,18 +24,37 @@ def rectify(source, transformation, discr_count=10):
     :param discr_count:
     :return: open3d pcd object
     """
-    timestamp_split = split_by_timestamp(source)
-    discretization_splited = split_in_groups(timestamp_split, discr_count)
-    aggregated_cloud = rectify_groups(discretization_splited, transformation)
+    timestamp_split = split_by_timestamp(source, timestamp)
+    # discretization_splited = split_in_groups(timestamp_split, discr_count)
+    # aggregated_cloud = rectify_groups(discretization_splited, transformation)
+
+    aggregated_cloud = rectify_pcds(timestamp_split, transformation)
     aggregated_pcd = np.zeros((0, 3))
     for pcd in aggregated_cloud:
-        aggregated_pcd = np.vstack((aggregated_pcd, np.asarray(pcd.points)))
+        aggregated_pcd = np.vstack((aggregated_pcd, pcd.points))
     pcd = open3d.geometry.PointCloud()
-    pcd.points = open3d.utility.Vector3dVector(aggregated_pcd)
-    # pcd.paint_uniform_color([0, 0, 0])
+    pcd.points = open3d.utility.Vector3dVector(copy.deepcopy(aggregated_pcd))
+    pcd.paint_uniform_color([0, 1, 0])
     return pcd
 
 
+
+
+def rectify_pcds(source_groups, transformation):
+    res = []
+    transformation = mrob.SE3(transformation).ln()
+    for tau in source_groups.keys():
+        T = mrob.SE3((tau * transformation))# интерполяция компенационного перехода
+        pcd = open3d.geometry.PointCloud()
+        pcd.points = open3d.utility.Vector3dVector(copy.deepcopy(source_groups[tau]))
+        pcd.transform(T.T())
+        res.append(copy.deepcopy(pcd))
+
+    return res
+
+
+
+@deprecation.deprecated(details="Use the rectify_pcds function instead")
 def rectify_groups(source_groups, transformation):
     discr_cnt = len(source_groups)
     xi_ini = np.array([0, 0, 0, 0, 0, 0], dtype='float64')
@@ -45,7 +69,7 @@ def rectify_groups(source_groups, transformation):
 
     return res
 
-
+@deprecation.deprecated(details="Use the rectify_pcds function instead")
 def split_in_groups(timestamps_split, discr_cnt = 10):
     ln = math.ceil(len(timestamps_split) / discr_cnt)
     pcds = []
@@ -54,7 +78,6 @@ def split_in_groups(timestamps_split, discr_cnt = 10):
         xyz = []
         for j in range(ln):
             ind = i * ln + j
-            # print(ind, len(timestamps_split))
             if ind < len(timestamps_split):
                 group = timestamps_split[ind]
                 for k in range(len(group)):
@@ -64,31 +87,27 @@ def split_in_groups(timestamps_split, discr_cnt = 10):
         if len(arr) != 0:
             # print(arr)
             pcd.points = open3d.utility.Vector3dVector(arr)
-            pcds.append(pcd.paint_uniform_color([0, 0, 1]))
+            pcds.append(copy.deepcopy(pcd.paint_uniform_color([0, 0, 1])))
     return pcds
 
 
-def split_by_timestamp(source):
-    colors = np.asarray(source.colors)
+def split_by_timestamp(source, colors):
     points = np.asarray(source.points)
-    pcd_split = []
+    print(len(colors), len(points))
+    pcd_split = dict()
     new_group = []
     prev_color = colors[0]
     for i in range(len(colors)):
         curr_color = colors[i]
         eq = True
-        for j in range(3):
-            if curr_color[j] != prev_color[j]:
-                eq = False
-                break
+        if curr_color != prev_color:
+            eq = False
         if eq:
-            new_group.append(points[i])
+            new_group.append(copy.deepcopy(points[i]))
         else:
-            pcd_split.append(new_group.copy())
+            pcd_split[prev_color] = new_group
             new_group = []
-
         prev_color = curr_color
-
     return pcd_split
 
 files = []
@@ -101,14 +120,28 @@ if __name__ == '__main__':
         for file in filenames:
             files.append(os.path.join(dirpath, file))
 
-    print(len(files))
     files.sort()
     files = files[:155]
-
+    #
     pcds = []
+    timestamps = []
     for file in files:
-        pcds.append(open3d.io.read_point_cloud(file))
+        data = np.genfromtxt(file, skip_header=11, delimiter= " ")
+        timestamps.append(data[:, -1])
+        pcd = open3d.geometry.PointCloud()
+        pcd.points = open3d.utility.Vector3dVector(data[:,:3])
+        pcds.append(open3d.io.read_point_cloud(file, format="pcd"))
+    #
+    #
+    # # for i in range(40):
 
-    transformation = find_transformation(pcds[150], pcds[152], np.eye(4))
-    aggregated_cloud = rectify(pcds[150], transformation)
+
+    transformation = find_transformation(pcds[150], pcds[149], np.eye(4))
+    aggregated_cloud = rectify(pcds[150], transformation, timestamp = timestamps[150])
+
+    # path = os.path.join(os.path.dirname(path), "rectified/150.pcd")
+    # p_rectified_old = open3d.io.read_point_cloud(path, format="pcd")
+    # p_rectified_old.paint_uniform_color([1, 0, 0])
     open3d.visualization.draw_geometries([pcds[150], aggregated_cloud])
+
+

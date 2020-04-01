@@ -24,19 +24,32 @@ def find_transformation(source, target, trans_init):
     if not target.has_normals():
         target.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.5, max_nn=50))
     transformation = o3d.registration.registration_icp(source, target, threshold, trans_init,
-                                                          o3d.registration.TransformationEstimationPointToPlane()).transformation
+                                                          o3d.registration.TransformationEstimationPointToPoint()).transformation
     return transformation
 
 
 # specified relative pathes to raw point clouds. Unccoment required raw data
 # path = r"data/2020-01-21/formatted"
 # path = r"data/2020-03-13-20-07/formatted"
-# path = r"data/2020-03-13-20-13-09/formatted"
-path = r"data/2020-03-13-20-14-16/formatted"
+path = r"data/2020-03-13-20-13-09/formatted"
+# path = r"data/2020-03-13-20-14-16/formatted"
+
+
+def delete_radius(pcd, R):
+    """
+    delete radius from (0, 0, 0)
+    """
+    points = np.asarray(pcd.points)
+    norms = np.linalg.norm(points, axis=1)
+    points = points[norms > R]
+    pcd = open3d.geometry.PointCloud()
+    pcd.points = open3d.utility.Vector3dVector(points)
+    # pcd.paint_uniform_color([0, 0, 0])
+    return pcd
 
 
 if __name__ == "__main__":
-    d = 0.2 # heuristic
+    d = 0.05 # heuristic
     files = []
     path_out_rectified_pcds = os.path.join(os.path.join(os.getcwd(), os.path.dirname(path)), "rectified")
     path_out_results = os.path.join(os.path.join(os.getcwd(), os.path.dirname(path)), "results")
@@ -53,18 +66,24 @@ if __name__ == "__main__":
     files.sort()
     print(files)
 
-    # files = files[:590]
+    # files = files[:80]
 
-    pcds = [] # list of rectified pcds
+    pcds = []
+    timestamps = []
     for file in files:
-        pcd = o3d.io.read_point_cloud(file)
-        # pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2)
-        if pcd.is_empty():
+
+        data = np.genfromtxt(file, skip_header=11, delimiter=" ")
+        if len(data) == 0:
             continue
-        pcds.append(pcd)
+        timestamps.append(data[:, -1])
+        pcd = open3d.geometry.PointCloud()
+        pcd.points = open3d.utility.Vector3dVector(data[:, :3])
+        # pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=1)
+        pcds.append(open3d.io.read_point_cloud(file, format="pcd"))
+
 
     trans_sum_approximation = np.eye(4)
-    pcd_full = [copy.deepcopy(rectify(pcds[0], trans_sum_approximation))]
+    pcd_full = [copy.deepcopy(delete_radius(rectify(pcds[0], trans_sum_approximation, timestamps[0]), 1))]
     cnt = 0
 
     poses = [trans_sum_approximation] # 3d poses
@@ -74,10 +93,11 @@ if __name__ == "__main__":
     eulers = np.zeros((0, 3))
     elapsed_times = []
 
-    for i in range(0, 10):
+    for i in range(0, len(files) - 2):
         s = time.time()
         trans = find_transformation(pcds[i + 1], pcds[i], np.eye(4)) # local transformation btwn pcds
-        pcd = rectify(pcds[i + 1], np.linalg.inv(trans))
+        pcd = rectify(pcds[i + 1], np.linalg.inv(trans), timestamps[i + 1])
+        # pcd = delete_radius(pcd, 1)
         pcds[i + 1] = copy.deepcopy(pcd)
         res_trans = find_transformation(pcd, pcd_full[-1], trans_sum_approximation @ np.linalg.inv(trans))
         trans_sum_approximation = res_trans
